@@ -1087,7 +1087,7 @@ end
 --[[--
 Transmits an @{ui.event.Event|Event} to active widgets, top to bottom.
 Stops at the first handler that returns `true`.
-Note that most complex widgets are based on @{ui.widget.container.WidgetContainer|WidgetContainer},
+Note that most complex widgets are based on @{ui.widget.container.widgetcontainer|WidgetContainer},
 which itself will take care of propagating an event to its members.
 
 @param event an @{ui.event.Event|Event} object

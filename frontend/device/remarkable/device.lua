@@ -49,8 +49,8 @@ local Remarkable1 = Remarkable:new{
     mt_width = 767, -- unscaled_size_check: ignore
     mt_height = 1023, -- unscaled_size_check: ignore
     input_wacom = "/dev/input/event0",
-    input_ts = "/dev/input/event1",
-    input_buttons = "/dev/input/event2",
+    input_ts = "/dev/input/event2",
+    input_buttons = "/dev/input/event1",
     battery_path = "/sys/class/power_supply/bq27441-0/capacity",
     status_path = "/sys/class/power_supply/bq27441-0/status",
 }
@@ -123,7 +123,7 @@ function Remarkable:init()
         event_map = require("device/remarkable/event_map"),
     }
 
-    self.input.open(self.input_wacom) -- Wacom
+    self.input.pen_fd = self.input.open(self.input_wacom) -- Wacom
     self.input.open(self.input_ts) -- Touchscreen
     self.input.open(self.input_buttons) -- Buttons
 

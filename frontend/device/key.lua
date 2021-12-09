@@ -1,4 +1,4 @@
---[[
+--[[--
 an interface for key presses
 ]]
 
@@ -24,7 +24,7 @@ function Key:__tostring()
     return table.concat(self:getSequence(), "-")
 end
 
---[[
+--[[--
 get a sequence that can be matched against later
 
 use this to let the user press a sequence and then
@@ -41,7 +41,7 @@ function Key:getSequence()
     table.insert(seq, self.key)
 end
 
---[[
+--[[--
 this will match a key against a sequence
 
 the sequence should be a table of key names that

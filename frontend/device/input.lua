@@ -195,6 +195,11 @@ local Input = {
     MTSlots = {},
     ev_slots = {},
     gesture_detector = nil,
+    -- Need these to give clearly join different fd event streams
+    last_fd = nil,
+    fd_last_slot= {},
+    pen_slot = 100,
+    fd_slot_set = {},
 
     -- simple internal clipboard implementation, can be overidden to use system clipboard
     hasClipboardText = function()
@@ -258,7 +263,7 @@ Note that we adhere to the "." syntax here for compatibility.
 @todo Clean up separation FFI/this.
 --]]
 function Input.open(device, is_emu_events)
-    input.open(device, is_emu_events and 1 or 0)
+    return input.open(device, is_emu_events and 1 or 0)
 end
 
 --[[--
@@ -464,6 +469,32 @@ function Input:handleKeyBoardEv(ev)
         end
     end
 
+    --Detect Remarkable pen interactions
+    --Events generated are a BTN_TOOL_PEN 1 event at the start of the interaction
+    --BTN_TOOL_PEN 0 at the end of the interaction
+    if self.pen_fd and self.pen_fd == ev.fd then
+        if ev.code == C.BTN_TOOL_PEN then
+                if ev.value > 0 then
+                    self:setCurrentMtSlot("tool", "pen")
+                else
+                    self:setCurrentMtSlot("tool", "none")
+                end
+
+                return
+        end
+
+        --Dectect Remarkable pen touches
+        --
+        if ev.code == C.BTN_TOUCH then
+            if ev.value > 0 then
+                self:setCurrentMtSlot("tool_contact", true)
+            else
+                self:setCurrentMtSlot("tool_contact", nil)
+            end
+            return
+        end
+    end
+
     local keycode = self.event_map[ev.code]
     if not keycode then
         -- do not handle keypress for keys we don't know
@@ -609,6 +640,13 @@ function Input:handleTouchEv(ev)
             table.insert(self.MTSlots, self:getMtSlot(self.cur_slot))
         end
         if ev.code == C.ABS_MT_SLOT then
+            self.fd_last_slot[ev.fd] = ev.value
+            if self.pen_fd then
+                if ev.fd == self.pen_fd then
+                    ev.value = self.pen_slot
+                end
+            end
+
             self:addSlotIfChanged(ev.value)
         elseif ev.code == C.ABS_MT_TRACKING_ID then
             if self.snow_protocol then
@@ -638,6 +676,7 @@ function Input:handleTouchEv(ev)
         elseif ev.code == C.ABS_Y then
             self:setCurrentMtSlot("abs_y", ev.value)
         elseif ev.code == C.ABS_PRESSURE then
+                self:setCurrentMtSlot("pressure",ev.value)
             if ev.value ~= 0 then
                 self:setCurrentMtSlot("id", 1)
                 self:confirmAbsxy()
@@ -645,14 +684,47 @@ function Input:handleTouchEv(ev)
                 self:cleanAbsxy()
                 self:setCurrentMtSlot("id", -1)
             end
+        elseif ev.code == C.ABS_TILT_X then
+            self:setCurrentMtSlot("tilt_x",ev.value)
+        elseif ev.code == C.ABS_TILT_Y then 
+            self:setCurrentMtSlot("tilt_y",ev.value)
         end
     elseif ev.type == C.EV_SYN then
+
         if ev.code == C.SYN_REPORT then
             -- Promote our event's time table to a real TimeVal
             setmetatable(ev.time, TimeVal)
             for _, MTSlot in ipairs(self.MTSlots) do
                 self:setMtSlot(MTSlot.slot, "timev", ev.time)
             end
+
+            --decide if we have got draw events coming in
+            --Basically because slots aren't honoured upstream we get trapped into thinking it is a pen tool forever
+            --So we are going to go back into the current slot and remove the pen tool
+            for i, MTSlot in ipairs(self.MTSlots) do
+                logger.dbg(MTSlot)
+                if MTSlot.tool then
+                    -- Ok, got a pen event, am I drawing or just hovering around or doing clean up after a tool end
+                    table.remove(self.MTSlots, i)
+                    if MTSlot.tool_contact then
+                        -- drawing
+                        return Event:new("PenDraw", {
+                            x= MTSlot.x,
+                            y= MTSlot.y,
+                            pressure = MTSlot.pressure,
+                            tilt_x = MTSlot.tilt_x,
+                            tilt_y = MTSlot.tilt_y
+                        })
+                    else
+                        --hovering
+                        return Event:new("PenHover", {
+                            x= MTSlot.x,
+                            y= MTSlot.y
+                        })
+                    end
+                end
+            end
+
             -- feed ev in all slots to state machine
             local touch_ges = self.gesture_detector:feedEvent(self.MTSlots)
             self.MTSlots = {}
@@ -677,6 +749,7 @@ function Input:handleTouchEvPhoenix(ev)
     --            input_mt_sync (elan_touch_data.input);
     --        finger 1 down:
     --            input_report_abs(elan_touch_data.input, C.ABS_MT_TRACKING_ID, 1);
+
     --            input_report_abs(elan_touch_data.input, C.ABS_MT_TOUCH_MAJOR, 1);
     --            input_report_abs(elan_touch_data.input, C.ABS_MT_WIDTH_MAJOR, 1);
     --            input_report_abs(elan_touch_data.input, C.ABS_MT_POSITION_X, x2);
@@ -1127,6 +1200,26 @@ function Input:waitEvent(now, deadline)
     if ok and ev then
         local handled = {}
         -- We're guaranteed that ev is an array of event tables. Might be an array of *one* event, but an array nonetheless ;).
+
+        if not self.fd_last_slot[ev[1].fd] then
+            self.fd_last_slot[ev[1].fd] = 0
+        end
+        -- Events come in all from one fd. only need to check for fd continuation here.
+        if self.last_fd then
+            --check if we have events, if the current source has changed, if it is a touch event, if the source has specified a slot and if we have a last slot
+            if ev[1].fd ~= self.last_fd and  ev[1].code ~= C.ABS_MT_SLOT and type(self.fd_last_slot[ev[1].fd]) == "number" then
+                table.insert(ev,1,{
+                    fd = ev[1].fd,
+                    type = C.EV_ABS,
+                    code = C.ABS_MT_SLOT,
+                    value = self.fd_last_slot[ev[1].fd],
+                    time = ev[1].time
+                })
+            end
+        end
+
+        self.last_fd = ev[1].fd
+
         for __, event in ipairs(ev) do
             if DEBUG.is_on then
                 -- NOTE: This is rather spammy and computationally intensive,

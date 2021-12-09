@@ -24,6 +24,8 @@ and to store that table as a configuration setting.
 
 ]]
 
+
+
 local DepGraph = require("depgraph")
 local Event = require("ui/event")
 local Geom = require("ui/geometry")
@@ -40,8 +42,28 @@ end
 
 local InputContainer = WidgetContainer:new{
     vertical_align = "top",
+		key_events = nil --
 }
 
+--[[--
+
+Initialize InputContainer
+
+Fields
+
+	self.key_events = {new_key_events}
+
+	new_key_events = {
+		[n] table - arrays of key combinations ie. {"Alt", "K"}
+		is_inactive optional boolean - ignores if true
+		event optional string - name for new event. if not present uses the key of this table in key_events
+		doc optional string - not sure
+		}
+
+	self.ges_events = {}
+
+
+]]
 function InputContainer:_init()
     -- we need to do deep copy here
     local new_key_events = {}
@@ -207,7 +229,7 @@ end
 --[[--
 Updates touch zones based on new screen dimensions.
 
-@tparam ui.geometry.Geom new_screen_dimen new screen dimensions
+@tparam @{ui.geometry|Geom} new_screen_dimen new screen dimensions
 ]]
 function InputContainer:updateTouchZonesOnScreenResize(new_screen_dimen)
     for _, tzone in ipairs(self._ordered_touch_zones) do
@@ -219,9 +241,12 @@ function InputContainer:updateTouchZonesOnScreenResize(new_screen_dimen)
     end
 end
 
---[[
+--[[--
 Handles keypresses and checks if they lead to a command.
 If this is the case, we retransmit another event within ourselves.
+
+@tparam @{device.key|Key} key
+@treturn bool if we handled the keypress in one of our children
 --]]
 function InputContainer:onKeyPress(key)
     for name, seq in pairs(self.key_events) do

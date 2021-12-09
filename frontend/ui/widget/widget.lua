@@ -13,6 +13,7 @@ rather than class variables.
 local EventListener = require("ui/widget/eventlistener")
 
 --- Widget base class
+-- @field dimen @{ui.geometry.Geom} dimensions of widget
 -- @table Widget
 local Widget = EventListener:new()
 
